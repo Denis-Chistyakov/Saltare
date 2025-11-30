@@ -1,0 +1,49 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Build artifacts
+saltare
+*.exe
+*.test
+*.out
+
+# Data directories
+data/
+logs/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.docker
+
+# Kubernetes
+deployments/
+
+# Test files
+*_test.go
+tests/
+coverage.*
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+

@@ -1,0 +1,120 @@
+# Saltare Configuration
+
+# Server Configuration
+server:
+  host: 0.0.0.0
+  port: 8080
+  read_timeout: 10s
+  write_timeout: 30s
+  max_body_size: 10MB
+
+# MCP Server Configuration
+mcp:
+  stdio:
+    enabled: true
+  http:
+    enabled: true
+    port: 8081
+    sse_enabled: true
+
+# LLM Provider Configuration
+# API keys can be set via environment variables:
+#   export CEREBRAS_API_KEY=your-key
+#   export OPENROUTER_API_KEY=your-key
+llm:
+  primary:
+    provider: cerebras
+    api_key: ${CEREBRAS_API_KEY}
+    endpoint: https://api.cerebras.ai/v1/chat/completions
+    model: llama-3.3-70b
+    timeout: 30s
+  fallback:
+    # Fallback: OpenRouter (if api_key set) OR local Ollama (if no key)
+    # For OpenRouter: Set your preferred model below (e.g., google/gemini-flash-1.5, meta-llama/llama-3.2-3b-instruct:free)
+    # For local Ollama: Use models like llama3.2:3b, qwen2.5:7b
+    api_key: ${OPENROUTER_API_KEY}
+    endpoint: https://openrouter.ai/api/v1/chat/completions
+    model: google/gemini-2.0-flash-exp:free
+    timeout: 30s
+
+# Search Configuration
+search:
+  local:
+    enabled: true
+
+# Storage Configuration
+storage:
+  type: badger
+  badger:
+    path: ./data/badger
+    compression: snappy
+    max_table_size: 64MB
+  
+  # Search engine selection: "meilisearch" or "typesense"
+  # Switch between engines based on your needs:
+  # - typesense: Fast keyword search with typo tolerance
+  # - meilisearch: Hybrid search (keyword + semantic) with AI embeddings
+  search:
+    provider: meilisearch  # Using Meilisearch for hybrid/semantic search
+    
+    # Meilisearch configuration (used when provider: meilisearch)
+    meilisearch:
+      enabled: true
+      host: http://localhost:7700
+      api_key: ${MEILISEARCH_API_KEY}  # Set via env or use default: saltare-dev-key
+      index_name: tools
+      timeout: 5s
+      
+      # Embedder configuration for semantic/hybrid search
+      # Supports: rest (OpenRouter), openAi, huggingFace, ollama, userProvided
+      embedder:
+        source: rest                                              # Use REST API (OpenRouter compatible)
+        url: https://openrouter.ai/api/v1/embeddings              # OpenRouter embeddings endpoint
+        api_key: ${OPENROUTER_API_KEY}                            # Same key as fallback LLM
+        model: openai/text-embedding-3-small                      # Model: 1536 dimensions
+        dimensions: 1536                                          # Vector dimensions
+        document_template: "{{doc.name}} {{doc.description}}"     # Template for document embedding
+      
+      # Hybrid search settings
+      hybrid_search:
+        enabled: true
+        semantic_ratio: 0.5    # 0.0 = keyword only, 1.0 = semantic only, 0.5 = balanced
+        embedder_name: default # Name of the embedder to use
+  
+  # Typesense configuration (used when provider: typesense)
+  typesense:
+    enabled: false
+    nodes:
+      - http://localhost:8108
+    api_key: ${TYPESENSE_API_KEY}
+    collection: tools
+    num_typos: 2
+    timeout: 5s
+
+# Async Jobs Configuration
+jobs:
+  num_workers: 10           # Number of concurrent job workers
+  queue_size: 1000          # Max jobs in queue
+  job_timeout: 5m           # Max execution time per job
+  cleanup_interval: 5m      # How often to run cleanup
+  max_job_age: 1h           # Delete completed jobs older than this
+  auto_delete_completed: true  # Delete jobs immediately after completion
+  keep_failed_jobs: true    # Keep failed jobs for debugging (even with auto_delete)
+
+# Analytics Configuration
+analytics:
+  enabled: true
+  retention_days: 30
+  aggregation_interval: 10s
+
+# Observability
+observability:
+  metrics:
+    enabled: true
+    port: 9090
+    path: /metrics
+  tracing:
+    enabled: false
+  logging:
+    level: debug
+    format: json

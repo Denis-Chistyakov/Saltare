@@ -1,0 +1,143 @@
+# Network Policies for Saltare
+# Restricts network traffic for security
+
+---
+# Default deny all ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: saltare
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# Allow ingress to Saltare from ingress controller
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-saltare-ingress
+  namespace: saltare
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: saltare
+  policyTypes:
+    - Ingress
+  ingress:
+    # From ingress controller
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8081
+    # From within the namespace (for health checks, etc.)
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8081
+
+---
+# Allow Saltare to access Meilisearch
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-meilisearch-from-saltare
+  namespace: saltare
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: meilisearch
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: saltare
+      ports:
+        - protocol: TCP
+          port: 7700
+
+---
+# Allow Saltare to access Typesense (if used)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-typesense-from-saltare
+  namespace: saltare
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: typesense
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: saltare
+      ports:
+        - protocol: TCP
+          port: 8108
+
+---
+# Allow egress to external APIs (Cerebras, OpenRouter)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-saltare-egress
+  namespace: saltare
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: saltare
+  policyTypes:
+    - Egress
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow Meilisearch
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: meilisearch
+      ports:
+        - protocol: TCP
+          port: 7700
+    # Allow Typesense
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: typesense
+      ports:
+        - protocol: TCP
+          port: 8108
+    # Allow external HTTPS (for LLM APIs)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+

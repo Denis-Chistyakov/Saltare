@@ -1,0 +1,95 @@
+# Ingress for external access
+# Requires an Ingress Controller (nginx, traefik, etc.)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: saltare
+  namespace: saltare
+  labels:
+    app.kubernetes.io/name: saltare
+  annotations:
+    # Nginx Ingress Controller annotations
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # Enable WebSocket support for SSE (Server-Sent Events)
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
+    # Rate limiting (optional)
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    # CORS (optional)
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    # TLS redirect
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # For cert-manager (optional)
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - saltare.example.com
+        - mcp.saltare.example.com
+      secretName: saltare-tls
+  rules:
+    # Main API
+    - host: saltare.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: saltare
+                port:
+                  name: http-api
+    # MCP endpoint (separate subdomain for clarity)
+    - host: mcp.saltare.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: saltare
+                port:
+                  name: mcp-http
+
+---
+# Alternative: Single host with path-based routing
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: saltare-paths
+  namespace: saltare
+  labels:
+    app.kubernetes.io/name: saltare
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.example.com
+      secretName: saltare-tls
+  rules:
+    - host: api.example.com
+      http:
+        paths:
+          # /saltare/* -> Saltare API
+          - path: /saltare(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: saltare
+                port:
+                  name: http-api
+          # /mcp/* -> MCP endpoint
+          - path: /mcp(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: saltare
+                port:
+                  name: mcp-http
+

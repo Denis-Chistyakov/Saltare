@@ -1,0 +1,60 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build artifacts
+dist/
+*.tar.gz
+*.zip
+
+# Test binary
+*.test
+
+# Output of go coverage tool
+*.out
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data directories
+data/
+*.db
+*.bak
+
+# Logs
+*.log
+logs/
+
+# Temp
+tmp/
+temp/
+
+# Demo binaries
+demo/mock_servers
+
+# Secrets (never commit!)
+*.pem
+*.key
+.env
+.env.local
+.env.*.local
+secrets/
+saltare-beta
+/.cursor/

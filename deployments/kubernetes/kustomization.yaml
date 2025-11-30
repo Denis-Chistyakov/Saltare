@@ -1,0 +1,47 @@
+# Kustomization for Saltare deployment
+# Usage:
+#   kubectl apply -k deployments/kubernetes/
+#   or
+#   kustomize build deployments/kubernetes/ | kubectl apply -f -
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: saltare
+
+# Common labels
+commonLabels:
+  app.kubernetes.io/part-of: saltare-system
+  app.kubernetes.io/managed-by: kustomize
+
+# Resources to deploy
+resources:
+  - namespace.yaml
+  - secrets.yaml
+  - configmap.yaml
+  - meilisearch.yaml        # Primary search engine
+  - saltare-deployment.yaml
+  - saltare-service.yaml
+  # Optional: uncomment if using Typesense instead
+  # - typesense.yaml
+  # Optional: uncomment for external access
+  # - ingress.yaml
+
+# Image customization
+images:
+  - name: ghcr.io/denis-chistyakov/saltare
+    newTag: latest
+  - name: getmeili/meilisearch
+    newTag: v1.12
+
+# ConfigMap generator (alternative to static configmap.yaml)
+# configMapGenerator:
+#   - name: saltare-config
+#     files:
+#       - configs/saltare.yaml
+
+# Secret generator (alternative to static secrets.yaml)
+# secretGenerator:
+#   - name: saltare-secrets
+#     envs:
+#       - .env.secrets
+

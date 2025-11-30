@@ -1,0 +1,113 @@
+# Typesense StatefulSet (alternative search engine)
+# Use this if you prefer Typesense over Meilisearch
+# Remember to set storage.search.provider: typesense in configmap
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: typesense
+  namespace: saltare
+  labels:
+    app.kubernetes.io/name: typesense
+    app.kubernetes.io/component: search-engine
+spec:
+  serviceName: typesense
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: typesense
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: typesense
+        app.kubernetes.io/component: search-engine
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      
+      containers:
+        - name: typesense
+          image: typesense/typesense:27.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8108
+              protocol: TCP
+          
+          env:
+            - name: TYPESENSE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: saltare-secrets
+                  key: typesense-api-key
+            - name: TYPESENSE_DATA_DIR
+              value: /data
+          
+          command:
+            - /opt/typesense-server
+            - --data-dir=/data
+            - --api-key=$(TYPESENSE_API_KEY)
+            - --enable-cors
+          
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+  
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: typesense
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 20Gi
+
+---
+# Typesense Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: typesense
+  namespace: saltare
+  labels:
+    app.kubernetes.io/name: typesense
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8108
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: typesense
+

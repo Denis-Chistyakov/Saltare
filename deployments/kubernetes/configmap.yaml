@@ -1,0 +1,95 @@
+# ConfigMap for Saltare configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: saltare-config
+  namespace: saltare
+  labels:
+    app.kubernetes.io/name: saltare
+data:
+  saltare.yaml: |
+    # Server Configuration
+    server:
+      host: 0.0.0.0
+      port: 8080
+      read_timeout: 30s
+      write_timeout: 30s
+
+    # MCP Transport Configuration
+    mcp:
+      http:
+        enabled: true
+        port: 8081
+      stdio:
+        enabled: false
+
+    # LLM Configuration (API keys from secrets via env vars)
+    llm:
+      primary:
+        provider: cerebras
+        api_key: ${CEREBRAS_API_KEY}
+        endpoint: https://api.cerebras.ai/v1/chat/completions
+        model: llama-3.3-70b
+        timeout: 30s
+      fallback:
+        api_key: ${OPENROUTER_API_KEY}
+        endpoint: https://openrouter.ai/api/v1/chat/completions
+        model: google/gemini-2.0-flash-exp:free
+        timeout: 30s
+
+    # Storage Configuration
+    storage:
+      type: badger
+      badger:
+        path: /data/badger
+        compression: snappy
+        max_table_size: 64MB
+
+      # Search engine selection
+      search:
+        provider: meilisearch
+        
+        meilisearch:
+          enabled: true
+          host: http://meilisearch:7700
+          api_key: ${MEILISEARCH_API_KEY}
+          index_name: tools
+          timeout: 5s
+          embedder:
+            source: rest
+            url: https://openrouter.ai/api/v1/embeddings
+            api_key: ${OPENROUTER_API_KEY}
+            model: openai/text-embedding-3-small
+            dimensions: 1536
+            document_template: "{{doc.name}} {{doc.description}}"
+          hybrid_search:
+            enabled: true
+            semantic_ratio: 0.5
+            embedder_name: default
+
+      typesense:
+        enabled: false
+        nodes:
+          - http://typesense:8108
+        api_key: ${TYPESENSE_API_KEY}
+        collection: tools
+        num_typos: 2
+        timeout: 5s
+
+    # Async Jobs Configuration
+    jobs:
+      num_workers: 10
+      queue_size: 1000
+      job_timeout: 5m
+      cleanup_interval: 5m
+
+    # Analytics
+    analytics:
+      enabled: true
+      retention_days: 30
+
+    # Logging
+    logging:
+      level: info
+      format: json
+

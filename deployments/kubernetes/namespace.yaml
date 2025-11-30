@@ -1,0 +1,9 @@
+# Namespace for Saltare deployment
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: saltare
+  labels:
+    app.kubernetes.io/name: saltare
+    app.kubernetes.io/part-of: saltare-system
+

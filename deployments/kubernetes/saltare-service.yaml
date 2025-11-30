@@ -1,0 +1,47 @@
+# Saltare Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: saltare
+  namespace: saltare
+  labels:
+    app.kubernetes.io/name: saltare
+    app.kubernetes.io/component: server
+spec:
+  type: ClusterIP
+  ports:
+    - name: http-api
+      port: 8080
+      targetPort: http-api
+      protocol: TCP
+    - name: mcp-http
+      port: 8081
+      targetPort: mcp-http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: saltare
+    app.kubernetes.io/component: server
+
+---
+# Headless Service for StatefulSet scenarios
+apiVersion: v1
+kind: Service
+metadata:
+  name: saltare-headless
+  namespace: saltare
+  labels:
+    app.kubernetes.io/name: saltare
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: http-api
+      port: 8080
+      targetPort: http-api
+    - name: mcp-http
+      port: 8081
+      targetPort: mcp-http
+  selector:
+    app.kubernetes.io/name: saltare
+    app.kubernetes.io/component: server
+

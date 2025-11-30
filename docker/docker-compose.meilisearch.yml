@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  meilisearch:
+    image: getmeili/meilisearch:v1.12
+    container_name: saltare-meilisearch
+    restart: unless-stopped
+    ports:
+      - "7700:7700"
+    volumes:
+      - meilisearch-data:/meili_data
+    environment:
+      - MEILI_MASTER_KEY=${MEILISEARCH_MASTER_KEY:-saltare-dev-key-12345}
+      - MEILI_ENV=development
+      - MEILI_NO_ANALYTICS=true
+      # Enable vector store for hybrid search
+      - MEILI_EXPERIMENTAL_VECTOR_STORE=true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - saltare-network
+
+networks:
+  saltare-network:
+    driver: bridge
+
+volumes:
+  meilisearch-data:
+
