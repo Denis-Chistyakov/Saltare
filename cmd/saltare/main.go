@@ -121,19 +121,19 @@ func main() {
 	case "typesense":
 		fallthrough
 	default:
-		if config.Storage.Typesense.Enabled {
+	if config.Storage.Typesense.Enabled {
 			tsClient, tsErr := typesense.NewClient(config.Storage.Typesense)
 			if tsErr != nil {
 				log.Warn().Err(tsErr).Msg("Failed to initialize Typesense, search will be local only")
-			} else {
-				// Create schema if not exists
-				if err := tsClient.CreateSchema(context.Background()); err != nil {
-					log.Warn().Err(err).Msg("Failed to create Typesense schema")
-				}
+		} else {
+			// Create schema if not exists
+			if err := tsClient.CreateSchema(context.Background()); err != nil {
+				log.Warn().Err(err).Msg("Failed to create Typesense schema")
+			}
 				searchProvider = tsClient
-				log.Info().
+			log.Info().
 					Str("provider", "typesense").
-					Str("collection", config.Storage.Typesense.Collection).
+				Str("collection", config.Storage.Typesense.Collection).
 					Msg("Typesense search provider initialized")
 			}
 		}
@@ -145,12 +145,12 @@ func main() {
 		log.Info().
 			Str("provider", searchProvider.Name()).
 			Msg("Search indexer connected to toolkit manager")
-		
+			
 		// Re-index loaded toolkits
-		for _, tk := range manager.ListToolkits() {
-			for _, tb := range tk.Toolboxes {
+			for _, tk := range manager.ListToolkits() {
+				for _, tb := range tk.Toolboxes {
 				if err := searchProvider.IndexToolbox(context.Background(), tb, tk.ID); err != nil {
-					log.Warn().Err(err).Str("toolbox", tb.Name).Msg("Failed to index toolbox")
+						log.Warn().Err(err).Str("toolbox", tb.Name).Msg("Failed to index toolbox")
 				}
 			}
 		}

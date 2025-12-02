@@ -118,3 +118,90 @@ observability:
   logging:
     level: debug
     format: json
+
+# Example Toolkits Configuration
+# Toolkits can be registered via API or defined here
+# Uncomment and modify for your use case:
+#
+# toolkits:
+#   - name: "Test Tools"
+#     toolboxes:
+#       - name: "test"
+#         version: "1.0.0"
+#         description: "Test toolkit for verification"
+#         tags: ["test", "demo"]
+#         tools:
+#           # HTTP transport example
+#           - name: "echo"
+#             description: "Echo test tool"
+#             mcp_server: "http://localhost:9001/mcp"
+#             input_schema:
+#               type: object
+#               properties:
+#                 message: { type: string }
+#               required: [message]
+#           
+#           # Stdio transport example
+#           - name: "read_file"
+#             description: "Read file via stdio MCP"
+#             transport: stdio
+#             stdio_config:
+#               command: npx
+#               args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+#             input_schema:
+#               type: object
+#               properties:
+#                 path: { type: string }
+#               required: [path]
+#
+# More examples below:
+#   - name: "Filesystem Tools"
+#     toolboxes:
+#       - name: "filesystem"
+#         version: "1.0.0"
+#         description: "File system operations via Anthropic MCP server"
+#         tools:
+#           # Example: HTTP transport (default)
+#           - name: "read_file_http"
+#             description: "Read file contents via HTTP MCP server"
+#             mcp_server: "http://localhost:9000/mcp"
+#             input_schema:
+#               type: object
+#               properties:
+#                 path:
+#                   type: string
+#               required: [path]
+#
+#           # Example: Stdio transport (spawn process)
+#           - name: "read_file"
+#             description: "Read file contents"
+#             transport: stdio
+#             stdio_config:
+#               command: npx
+#               args: ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
+#               env:
+#                 NODE_ENV: production
+#             input_schema:
+#               type: object
+#               properties:
+#                 path:
+#                   type: string
+#               required: [path]
+#
+#   - name: "GitHub Tools"
+#     toolboxes:
+#       - name: "github"
+#         version: "1.0.0"
+#         tools:
+#           - name: "search_repos"
+#             transport: stdio
+#             stdio_config:
+#               command: npx
+#               args: ["-y", "@modelcontextprotocol/server-github"]
+#               env:
+#                 GITHUB_TOKEN: "${GITHUB_TOKEN}"
+#             input_schema:
+#               type: object
+#               properties:
+#                 query:
+#                   type: string

@@ -104,13 +104,23 @@ func (l *Loader) convertToTool(cfg types.ToolConfig) (*types.Tool, error) {
 	if cfg.Name == "" {
 		return nil, fmt.Errorf("tool name is required")
 	}
-	if cfg.MCPServer == "" {
-		return nil, fmt.Errorf("tool mcp_server is required")
-	}
 
-	// Validate MCP server URL
+	// For stdio transport, MCPServer can be empty (command is in stdio_config)
+	if cfg.Transport == "stdio" {
+		if cfg.StdioConfig == nil || cfg.StdioConfig.Command == "" {
+			return nil, fmt.Errorf("stdio transport requires stdio_config with command")
+		}
+	} else {
+		// HTTP transport requires MCPServer URL
+	if cfg.MCPServer == "" {
+			return nil, fmt.Errorf("tool mcp_server is required for HTTP transport")
+	}
+		// Validate MCP server URL (skip for stdio: prefix)
+		if !isStdioScheme(cfg.MCPServer) {
 	if err := validateURL(cfg.MCPServer); err != nil {
 		return nil, fmt.Errorf("invalid mcp_server URL %s: %w", cfg.MCPServer, err)
+			}
+		}
 	}
 
 	// Validate input schema
@@ -123,10 +133,17 @@ func (l *Loader) convertToTool(cfg types.ToolConfig) (*types.Tool, error) {
 		Description: cfg.Description,
 		InputSchema: cfg.InputSchema,
 		MCPServer:   cfg.MCPServer,
+		Transport:   cfg.Transport,
+		StdioConfig: cfg.StdioConfig,
 		Timeout:     0, // Use default
 	}
 
 	return tool, nil
+}
+
+// isStdioScheme checks if the URL is a stdio scheme
+func isStdioScheme(urlStr string) bool {
+	return len(urlStr) > 6 && urlStr[:6] == "stdio:"
 }
 
 // validateURL validates a URL string

@@ -42,6 +42,20 @@ type Tool struct {
 	MCPServer   string                 `json:"mcp_server" validate:"required"`
 	Timeout     time.Duration          `json:"timeout,omitempty"`
 	CreatedAt   time.Time              `json:"created_at"`
+
+	// Transport configuration (optional, defaults to HTTP)
+	// Transport: "http" (default) or "stdio"
+	Transport string `json:"transport,omitempty"`
+	// StdioConfig for stdio transport (command, args, env)
+	StdioConfig *StdioConfig `json:"stdio_config,omitempty"`
+}
+
+// StdioConfig holds configuration for stdio-based MCP servers
+type StdioConfig struct {
+	Command string            `json:"command" yaml:"command"`                   // e.g., "npx", "python"
+	Args    []string          `json:"args,omitempty" yaml:"args"`               // e.g., ["-y", "@anthropic/mcp-server-filesystem"]
+	Env     map[string]string `json:"env,omitempty" yaml:"env"`                 // Environment variables
+	WorkDir string            `json:"work_dir,omitempty" yaml:"work_dir"`       // Working directory
 }
 
 // Intent represents parsed user intent from LLM
@@ -339,6 +353,9 @@ type ToolConfig struct {
 	Description string                 `yaml:"description"`
 	InputSchema map[string]interface{} `yaml:"input_schema"`
 	MCPServer   string                 `yaml:"mcp_server"`
+	// Transport: "http" (default) or "stdio"
+	Transport   string       `yaml:"transport,omitempty"`
+	StdioConfig *StdioConfig `yaml:"stdio_config,omitempty"`
 }
 
 // Analytics Types

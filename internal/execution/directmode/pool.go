@@ -12,44 +12,56 @@ import (
 )
 
 // ConnectionPool manages MCP client connections with pooling and health checks
+// Supports both HTTP and Stdio transports
 type ConnectionPool struct {
-	serverURL      string
-	maxConnections int
-	idleTimeout    time.Duration
+	serverURL       string
+	transportConfig *mcpclient.TransportConfig
+	maxConnections  int
+	idleTimeout     time.Duration
 	
-	pool        chan *PooledConnection
-	active      map[*PooledConnection]time.Time
-	mu          sync.RWMutex
-	closed      bool
-	done        chan struct{} // Signal to stop cleanup goroutine
+	pool   chan *PooledConnection
+	active map[*PooledConnection]time.Time
+	mu     sync.RWMutex
+	closed bool
+	done   chan struct{} // Signal to stop cleanup goroutine
 	
-	metrics     *PoolMetrics
+	metrics *PoolMetrics
 }
 
 // PooledConnection wraps an MCP client with metadata
 type PooledConnection struct {
-	client       *mcpclient.Client
-	createdAt    time.Time
-	lastUsed     time.Time
-	totalCalls   int64
-	errorCount   atomic.Int64 // Thread-safe error counter
+	client     *mcpclient.Client
+	createdAt  time.Time
+	lastUsed   time.Time
+	totalCalls int64
+	errorCount atomic.Int64 // Thread-safe error counter
 }
 
 // PoolMetrics tracks connection pool statistics
 type PoolMetrics struct {
 	mu sync.RWMutex
 	
-	totalAcquires  int64
-	totalReleases  int64
-	totalCreated   int64
-	totalClosed    int64
-	currentActive  int64
-	currentIdle    int64
-	totalErrors    int64
+	totalAcquires int64
+	totalReleases int64
+	totalCreated  int64
+	totalClosed   int64
+	currentActive int64
+	currentIdle   int64
+	totalErrors   int64
 }
 
-// NewConnectionPool creates a new connection pool for a specific MCP server
+// NewConnectionPool creates a new connection pool for a specific MCP server (HTTP transport)
+// Backward compatible - creates HTTP transport by default
 func NewConnectionPool(serverURL string, maxConnections int, idleTimeout time.Duration) *ConnectionPool {
+	return NewConnectionPoolWithConfig(&mcpclient.TransportConfig{
+		Type:    mcpclient.TransportHTTP,
+		URL:     serverURL,
+		Timeout: 30 * time.Second,
+	}, maxConnections, idleTimeout)
+}
+
+// NewConnectionPoolWithConfig creates a new connection pool with custom transport config
+func NewConnectionPoolWithConfig(cfg *mcpclient.TransportConfig, maxConnections int, idleTimeout time.Duration) *ConnectionPool {
 	if maxConnections <= 0 {
 		maxConnections = 10
 	}
@@ -57,21 +69,34 @@ func NewConnectionPool(serverURL string, maxConnections int, idleTimeout time.Du
 		idleTimeout = 5 * time.Minute
 	}
 
+	// For stdio, we typically want fewer connections (process per connection)
+	if cfg.Type == mcpclient.TransportStdio && maxConnections > 3 {
+		maxConnections = 3
+		log.Info().Msg("Limiting stdio pool to 3 connections (process per connection)")
+	}
+
+	serverID := cfg.URL
+	if cfg.Type == mcpclient.TransportStdio {
+		serverID = cfg.Command
+	}
+
 	pool := &ConnectionPool{
-		serverURL:      serverURL,
-		maxConnections: maxConnections,
-		idleTimeout:    idleTimeout,
-		pool:           make(chan *PooledConnection, maxConnections),
-		active:         make(map[*PooledConnection]time.Time),
-		done:           make(chan struct{}),
-		metrics:        &PoolMetrics{},
+		serverURL:       serverID,
+		transportConfig: cfg,
+		maxConnections:  maxConnections,
+		idleTimeout:     idleTimeout,
+		pool:            make(chan *PooledConnection, maxConnections),
+		active:          make(map[*PooledConnection]time.Time),
+		done:            make(chan struct{}),
+		metrics:         &PoolMetrics{},
 	}
 
 	// Start background cleanup goroutine
 	go pool.cleanupIdleConnections()
 
 	log.Info().
-		Str("server", serverURL).
+		Str("server", serverID).
+		Str("transport", string(cfg.Type)).
 		Int("max_connections", maxConnections).
 		Dur("idle_timeout", idleTimeout).
 		Msg("Connection pool created")
@@ -177,14 +202,21 @@ func (p *ConnectionPool) createConnection(ctx context.Context) (*PooledConnectio
 	}
 	p.mu.Unlock()
 
-	// Create new client (without holding lock for I/O operation)
-	client := mcpclient.New(p.serverURL)
+	// Create new client with appropriate transport
+	client, err := mcpclient.NewWithConfig(p.transportConfig)
+	if err != nil {
+		p.metrics.mu.Lock()
+		p.metrics.totalErrors++
+		p.metrics.mu.Unlock()
+		return nil, err
+	}
 
 	// Initialize client with timeout
 	initCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	if err := client.Initialize(initCtx); err != nil {
+		client.Close()
 		p.metrics.mu.Lock()
 		p.metrics.totalErrors++
 		p.metrics.mu.Unlock()
@@ -209,6 +241,7 @@ func (p *ConnectionPool) createConnection(ctx context.Context) (*PooledConnectio
 
 	log.Info().
 		Str("server", p.serverURL).
+		Str("transport", string(p.transportConfig.Type)).
 		Int("active", activeCount+1).
 		Msg("New connection created")
 
@@ -217,6 +250,11 @@ func (p *ConnectionPool) createConnection(ctx context.Context) (*PooledConnectio
 
 // isHealthy checks if a connection is still healthy
 func (p *ConnectionPool) isHealthy(ctx context.Context, conn *PooledConnection) bool {
+	// Check if transport is connected
+	if !conn.client.IsConnected() {
+		return false
+	}
+
 	// Simple health check: try to list tools
 	healthCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
@@ -318,19 +356,24 @@ func (p *ConnectionPool) Close() error {
 		return nil
 	}
 	p.closed = true
+	
+	// Collect active connections to close (copy to avoid holding lock during close)
+	activeConns := make([]*PooledConnection, 0, len(p.active))
+	for conn := range p.active {
+		activeConns = append(activeConns, conn)
+	}
+	p.active = make(map[*PooledConnection]time.Time) // Clear map
 	p.mu.Unlock()
 
 	// Signal cleanup goroutine to stop
 	close(p.done)
 
-	// Close all active connections
-	p.mu.RLock()
-	for conn := range p.active {
+	// Close all active connections (without holding lock)
+	for _, conn := range activeConns {
 		p.closeConnection(conn)
 	}
-	p.mu.RUnlock()
 
-	// Close all pooled connections
+	// Close pool channel and drain remaining connections
 	close(p.pool)
 	for conn := range p.pool {
 		p.closeConnection(conn)
@@ -347,6 +390,7 @@ func (p *ConnectionPool) GetMetrics() map[string]interface{} {
 
 	return map[string]interface{}{
 		"server":          p.serverURL,
+		"transport":       string(p.transportConfig.Type),
 		"total_acquires":  p.metrics.totalAcquires,
 		"total_releases":  p.metrics.totalReleases,
 		"total_created":   p.metrics.totalCreated,
@@ -358,3 +402,7 @@ func (p *ConnectionPool) GetMetrics() map[string]interface{} {
 	}
 }
 
+// TransportType returns the transport type used by this pool
+func (p *ConnectionPool) TransportType() mcpclient.TransportType {
+	return p.transportConfig.Type
+}

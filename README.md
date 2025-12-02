@@ -74,6 +74,62 @@ One endpoint, multiple protocols:
 - **HTTP REST API** — For any HTTP client
 - **CLI** — Command-line interface for scripts
 
+### 🔀 Dual Transport Support (NEW!)
+Connect to MCP servers via **HTTP** or **Stdio**:
+
+| Transport | Use Case | Example |
+|-----------|----------|---------|
+| **HTTP** | Remote MCP servers | `http://localhost:8082/mcp` |
+| **Stdio** | Local npx/process servers | `npx @anthropic/mcp-server-filesystem` |
+
+**Stdio Transport Features:**
+- 🚀 Auto-spawn processes on demand
+- 🔄 Auto-restart on crash (configurable)
+- 📊 Connection pooling for efficiency
+- ⚡ Async request/response with request ID tracking
+
+```yaml
+# Example: Stdio MCP server in config
+tools:
+  - name: "read_file"
+    transport: stdio
+    stdio_config:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
+```
+
+### 🔗 MCP Proxy Server (NEW!)
+**`saltare-mcp`** — A standalone stdio MCP proxy that aggregates multiple backends into a single server.
+
+**Perfect for:**
+- 🎯 **Cursor/Claude Desktop** — One MCP server instead of many
+- 🔄 **Tool Aggregation** — Combine memory, context7, sequential-thinking, etc.
+- 📊 **Unified Interface** — All tools prefixed by backend name
+
+```bash
+# Build the proxy
+go build -o bin/saltare-mcp ./cmd/saltare-mcp
+
+# Configure in ~/.cursor/mcp.json
+{
+  "mcpServers": {
+    "saltare": {
+      "command": "/path/to/saltare-mcp",
+      "env": {
+        "SALTARE_BACKENDS": "memory|stdio|npx|-y|@modelcontextprotocol/server-memory\ncontext7|stdio|npx|-y|@upstash/context7-mcp"
+      }
+    }
+  }
+}
+```
+
+**Backend Format:** `name|transport|command|arg1|arg2|...` (newline separated)
+
+**Example tools through proxy:**
+- `memory_create_entities` → memory backend
+- `context7_resolve-library-id` → context7 backend
+- `sequential-thinking_sequentialthinking` → thinking backend
+
 ### 📦 Tool Mesh Architecture
 Aggregate tools from multiple MCP servers into a unified registry. Search, discover, and execute tools from anywhere.
 

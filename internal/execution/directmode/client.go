@@ -1,20 +1,22 @@
 package directmode
 
-// Package directmode implements Direct Mode execution - calling MCP servers directly via HTTP.
+// Package directmode implements Direct Mode execution - calling MCP servers directly via HTTP or Stdio.
 // Includes connection pooling, circuit breakers, and retry logic for reliable tool execution.
 
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Denis-Chistyakov/Saltare/internal/execution"
+	"github.com/Denis-Chistyakov/Saltare/pkg/mcpclient"
 	"github.com/Denis-Chistyakov/Saltare/pkg/types"
 	"github.com/rs/zerolog/log"
 )
 
-// DirectExecutor executes tools via MCP protocol
+// DirectExecutor executes tools via MCP protocol (HTTP or Stdio)
 type DirectExecutor struct {
 	pools   map[string]*ConnectionPool
 	breaker *CircuitBreakerManager
@@ -23,6 +25,9 @@ type DirectExecutor struct {
 
 	maxConnectionsPerServer int
 	idleTimeout             time.Duration
+
+	// Stdio process configs (command -> config)
+	stdioConfigs map[string]*mcpclient.TransportConfig
 }
 
 // NewDirectExecutor creates a new direct mode executor
@@ -37,15 +42,40 @@ func NewDirectExecutor(timeout time.Duration) *DirectExecutor {
 		timeout:                 timeout,
 		maxConnectionsPerServer: 10,
 		idleTimeout:             5 * time.Minute,
+		stdioConfigs:            make(map[string]*mcpclient.TransportConfig),
 	}
+}
+
+// RegisterStdioServer registers a stdio-based MCP server configuration
+func (e *DirectExecutor) RegisterStdioServer(name string, cfg *mcpclient.TransportConfig) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	cfg.Type = mcpclient.TransportStdio
+	e.stdioConfigs[name] = cfg
+
+	log.Info().
+		Str("name", name).
+		Str("command", cfg.Command).
+		Strs("args", cfg.Args).
+		Msg("Registered stdio MCP server")
 }
 
 // Execute executes a tool via MCP protocol
 func (e *DirectExecutor) Execute(ctx context.Context, tool *types.Tool, args map[string]interface{}) (*execution.ExecutionResult, error) {
 	startTime := time.Now()
 
+	// Determine transport type from tool configuration
+	transportConfig := e.getTransportConfig(tool)
+
+	// Generate pool ID (use command for stdio, URL for HTTP)
+	poolID := tool.MCPServer
+	if transportConfig.Type == mcpclient.TransportStdio {
+		poolID = fmt.Sprintf("stdio:%s", transportConfig.Command)
+	}
+
 	// Get connection pool for the server
-	pool, err := e.getPool(tool.MCPServer)
+	pool, err := e.getPool(poolID, transportConfig)
 	if err != nil {
 		return nil, &execution.ExecutionError{
 			Code:       "pool_error",
@@ -86,6 +116,7 @@ func (e *DirectExecutor) Execute(ctx context.Context, tool *types.Tool, args map
 			Err(err).
 			Str("tool", tool.Name).
 			Str("server", tool.MCPServer).
+			Str("transport", string(transportConfig.Type)).
 			Dur("duration", duration).
 			Msg("Tool execution failed")
 
@@ -101,6 +132,7 @@ func (e *DirectExecutor) Execute(ctx context.Context, tool *types.Tool, args map
 	log.Info().
 		Str("tool", tool.Name).
 		Str("server", tool.MCPServer).
+		Str("transport", string(transportConfig.Type)).
 		Dur("duration", duration).
 		Msg("Tool executed successfully")
 
@@ -110,17 +142,68 @@ func (e *DirectExecutor) Execute(ctx context.Context, tool *types.Tool, args map
 		Duration:  duration,
 		Timestamp: time.Now(),
 		Metadata: map[string]interface{}{
-			"server": tool.MCPServer,
-			"mode":   "direct",
+			"server":    tool.MCPServer,
+			"mode":      "direct",
+			"transport": string(transportConfig.Type),
 		},
 	}, nil
 }
 
-// getPool returns or creates a connection pool for the given server URL
-func (e *DirectExecutor) getPool(serverURL string) (*ConnectionPool, error) {
+// getTransportConfig determines the transport configuration based on Tool config
+func (e *DirectExecutor) getTransportConfig(tool *types.Tool) *mcpclient.TransportConfig {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	// Check if tool has explicit transport configuration
+	if tool.Transport == "stdio" && tool.StdioConfig != nil {
+		return &mcpclient.TransportConfig{
+			Type:            mcpclient.TransportStdio,
+			Command:         tool.StdioConfig.Command,
+			Args:            tool.StdioConfig.Args,
+			Env:             tool.StdioConfig.Env,
+			WorkDir:         tool.StdioConfig.WorkDir,
+			AutoRestart:     true,
+			MaxRestarts:     3,
+			RestartInterval: 5 * time.Second,
+			Timeout:         e.timeout,
+		}
+	}
+
+	// Check if it's a registered stdio server (by name)
+	if cfg, ok := e.stdioConfigs[tool.MCPServer]; ok {
+		return cfg
+	}
+
+	// Check if MCPServer looks like a stdio command (starts with "stdio:" prefix)
+	if strings.HasPrefix(tool.MCPServer, "stdio:") {
+		parts := strings.SplitN(tool.MCPServer[6:], " ", 2)
+		cfg := &mcpclient.TransportConfig{
+			Type:            mcpclient.TransportStdio,
+			Command:         parts[0],
+			AutoRestart:     true,
+			MaxRestarts:     3,
+			RestartInterval: 5 * time.Second,
+			Timeout:         30 * time.Second,
+		}
+		if len(parts) > 1 {
+			cfg.Args = strings.Fields(parts[1])
+		}
+		return cfg
+	}
+
+	// Default to HTTP transport
+	return &mcpclient.TransportConfig{
+		Type:    mcpclient.TransportHTTP,
+		URL:     tool.MCPServer,
+		Timeout: e.timeout,
+	}
+}
+
+// getPool returns or creates a connection pool for the given server
+func (e *DirectExecutor) getPool(serverID string, cfg *mcpclient.TransportConfig) (*ConnectionPool, error) {
 	// Check if pool already exists
 	e.mu.RLock()
-	pool, exists := e.pools[serverURL]
+	pool, exists := e.pools[serverID]
 	e.mu.RUnlock()
 
 	if exists {
@@ -132,16 +215,17 @@ func (e *DirectExecutor) getPool(serverURL string) (*ConnectionPool, error) {
 	defer e.mu.Unlock()
 
 	// Double-check after acquiring write lock
-	if pool, exists := e.pools[serverURL]; exists {
+	if pool, exists := e.pools[serverID]; exists {
 		return pool, nil
 	}
 
-	// Create connection pool
-	pool = NewConnectionPool(serverURL, e.maxConnectionsPerServer, e.idleTimeout)
-	e.pools[serverURL] = pool
+	// Create connection pool with transport config
+	pool = NewConnectionPoolWithConfig(cfg, e.maxConnectionsPerServer, e.idleTimeout)
+	e.pools[serverID] = pool
 
 	log.Info().
-		Str("server", serverURL).
+		Str("server", serverID).
+		Str("transport", string(cfg.Type)).
 		Int("max_connections", e.maxConnectionsPerServer).
 		Msg("Connection pool created for server")
 
@@ -183,10 +267,16 @@ func (e *DirectExecutor) GetStats() map[string]interface{} {
 		poolStats[serverURL] = pool.GetMetrics()
 	}
 
+	stdioServers := make([]string, 0, len(e.stdioConfigs))
+	for name := range e.stdioConfigs {
+		stdioServers = append(stdioServers, name)
+	}
+
 	return map[string]interface{}{
 		"timeout":          e.timeout.String(),
 		"total_pools":      len(e.pools),
 		"pools":            poolStats,
 		"circuit_breakers": e.breaker.GetMetrics(),
+		"stdio_servers":    stdioServers,
 	}
 }
